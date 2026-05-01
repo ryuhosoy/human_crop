@@ -1,5 +1,7 @@
 # coding: utf-8
 import os
+import datetime
+from pathlib import Path
 import cv2
 import numpy as np
 import rclpy
@@ -14,8 +16,15 @@ class HumanCropNode(Node):
     def __init__(self):
         super().__init__('human_crop_node')
         self.bridge = CvBridge()
-        self.save_dir = '/tmp/human_crops'
-        os.makedirs(self.save_dir, exist_ok=True)
+
+        default_base_dir = Path(__file__).resolve().parents[1] / 'human_crops'
+        base_dir = Path(os.environ.get(
+            'HUMAN_CROP_SAVE_DIR',
+            str(default_base_dir),
+        ))
+        session_name = datetime.datetime.now().strftime('session_%Y%m%d_%H%M%S')
+        self.save_dir = base_dir / session_name
+        self.save_dir.mkdir(parents=True, exist_ok=True)
         self.save_count = 0
 
         shigure_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -39,6 +48,8 @@ class HumanCropNode(Node):
         color_img = self.bridge.compressed_imgmsg_to_cv2(color_img_src)
         h, w = color_img.shape[:2]
 
+        stamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+
         for bbox in bbox_src.bounding_boxes:
             if bbox.class_id != 'person':
                 continue
@@ -55,7 +66,7 @@ class HumanCropNode(Node):
             if cropped.size == 0:
                 continue
 
-            filename = os.path.join(self.save_dir, f'person_{self.save_count:05d}.jpg')
+            filename = str(self.save_dir / f'person_{stamp}_{self.save_count:05d}.jpg')
             cv2.imwrite(filename, cropped)
             self.get_logger().info(f'Saved: {filename}')
             self.save_count += 1
