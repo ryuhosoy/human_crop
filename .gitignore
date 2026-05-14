@@ -1,0 +1,6 @@
+human_crops/
+__pycache__/
+*.pyc
+build/
+install/
+log/

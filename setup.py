@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'human_crop_node = human_crop.human_crop_node:main',
         ],
     },
 )
