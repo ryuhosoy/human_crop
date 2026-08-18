@@ -1,20 +1,36 @@
-"""InsightFace で、すでに切り抜いた顔画像のコサイン類似度を取る"""
+"""AdaFace で、すでに切り抜いた顔画像のコサイン類似度を取る"""
+
+from pathlib import Path
+import urllib.request
 
 import cv2
 import numpy as np
-from pathlib import Path
+import onnxruntime as ort
 from insightface.app.common import Face
 from insightface.model_zoo import model_zoo
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-IMAGES_DIR = SCRIPT_DIR / "images"
-MODEL_DIR = Path.home() / ".insightface" / "models" / "buffalo_l"
-REC_MODEL = MODEL_DIR / "w600k_r50.onnx"
-LMK_MODEL = MODEL_DIR / "1k3d68.onnx"
+IMAGES_DIR = SCRIPT_DIR.parent / "insightface" / "images"
+MODEL_PATH = SCRIPT_DIR / "weights" / "adaface_ir_101.onnx"
+MODEL_URL = "https://github.com/yakhyo/adaface-onnx/releases/download/weights/adaface_ir_101.onnx"
 
-# 認識と 3D ランドマーク（姿勢）だけ使う（検出はしない）
-rec = model_zoo.get_model(str(REC_MODEL), providers=["CPUExecutionProvider"])
-rec.prepare(ctx_id=0)
+
+def ensure_model() -> None:
+    if MODEL_PATH.exists():
+        return
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    print(f"AdaFace モデルをダウンロード中: {MODEL_URL}")
+    urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+    print(f"保存: {MODEL_PATH}")
+
+
+ensure_model()
+
+session = ort.InferenceSession(str(MODEL_PATH), providers=["CPUExecutionProvider"])
+INPUT_NAME = session.get_inputs()[0].name
+
+# AdaFace に姿勢推定はないので、InsightFace の 3D ランドマークを使う
+LMK_MODEL = Path.home() / ".insightface" / "models" / "buffalo_l" / "1k3d68.onnx"
 lmk = model_zoo.get_model(str(LMK_MODEL), providers=["CPUExecutionProvider"])
 lmk.prepare(ctx_id=0)
 
@@ -32,7 +48,15 @@ def to_112(img: np.ndarray) -> np.ndarray:
 
 
 def get_embedding(cropped_bgr: np.ndarray) -> np.ndarray:
-    return rec.get_feat(to_112(cropped_bgr)).flatten()
+    """AdaFace 公式と同じ BGR 正規化: (x - 127.5) / 127.5"""
+    blob = cv2.dnn.blobFromImage(
+        to_112(cropped_bgr),
+        scalefactor=1.0 / 127.5,
+        size=(112, 112),
+        mean=(127.5, 127.5, 127.5),
+        swapRB=False,
+    )
+    return session.run(None, {INPUT_NAME: blob})[0].flatten()
 
 
 def get_pose(cropped_bgr: np.ndarray) -> dict:
@@ -55,7 +79,7 @@ def get_cosine_similarity(embedding1: np.ndarray, embedding2: np.ndarray) -> flo
     return cosine_similarity
 
 
-def verify_faces(path1: str, path2: str, threshold: float = 0.5) -> dict:
+def verify_faces(path1: str, path2: str, threshold: float = 0.4) -> dict:
     img1 = load_image(path1)
     img2 = load_image(path2)
 
@@ -82,8 +106,8 @@ def verify_faces(path1: str, path2: str, threshold: float = 0.5) -> dict:
 
 if __name__ == "__main__":
     result = verify_faces(
-        str(IMAGES_DIR / "user_new7_534.jpg"),
-        str(IMAGES_DIR / "user_new25_2.jpg"),
+        str(IMAGES_DIR / "person_a.jpg"),
+        str(IMAGES_DIR / "person_a_2.jpg"),
     )
     for k, v in result.items():
         print(f"{k}: {v}")
